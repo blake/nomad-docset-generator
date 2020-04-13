@@ -28,7 +28,10 @@ git checkout "v${TAG}"
 
 # Install gems
 cd "${WEBSITE_PATH}"
-bundle install
+npm install
+
+# Build website
+npm run static
 
 rm Rakefile || true
 ln -s "${CWD}/Rakefile" . || true
