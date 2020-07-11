@@ -23,6 +23,7 @@ mkdir -p "${BUILD_PATH}"
 git clone "https://github.com/hashicorp/nomad.git" || true
 cd "${NOMAD_PATH}"
 git fetch --all --prune
+git fetch --tags
 git checkout -- .
 git checkout "v${TAG}"
 
