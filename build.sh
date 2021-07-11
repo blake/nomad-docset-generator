@@ -25,7 +25,13 @@ cd "${NOMAD_PATH}"
 git fetch --all --prune
 git fetch --tags
 git checkout -- .
+git clean -d --force -x
 git checkout "v${TAG}"
+
+# Convert redirects to JSON file so they can be evaluated during site build
+if [[ -f "${WEBSITE_PATH}/redirects.js" ]]; then
+    eval "${CWD}/tools/redirects-to-json.js ${WEBSITE_PATH}/redirects.js" > "${WEBSITE_PATH}/redirects.json"
+fi
 
 # Install gems
 cd "${WEBSITE_PATH}"

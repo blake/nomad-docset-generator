@@ -1,11 +1,79 @@
 # frozen_string_literal: true
 
 require 'erb'
+require 'json'
 require 'nokogiri'
 require 'sqlite3'
 
 # Nomad website URL
-BASE_URL = 'https://nomadproject.io'
+BASE_URL = 'https://www.nomadproject.io'
+
+# This method attempts to resolve the location of a file on disk given a
+# relative, or absolute path.
+def resolve_file_path(anchor)
+  return anchor if anchor.path.end_with?('index.html') && File.exist?("out#{anchor.path}")
+
+  # Check if path is in list of redirects
+  # This the initial source path
+  redirect_source = anchor.path
+  # This is the final destination
+  redirect_final_dest = nil
+  # Trigger to stop redirect evaluation
+  stop_redirect_evaluation = false
+
+  until stop_redirect_evaluation
+    stop_redirect_evaluation = true
+
+    next unless REDIRECTS.key?(redirect_source)
+
+    redirect_source = REDIRECTS[redirect_source]
+    redirect_final_dest = URI.parse(redirect_source)
+    stop_redirect_evaluation = false
+  end
+
+  # Return path if redirect resolved to an external URL
+  case redirect_final_dest.class.to_s
+  when 'URI::HTTP', 'URI::HTTPS'
+    return redirect_final_dest
+  when 'URI::Generic'
+    begin
+      anchor = anchor.merge(redirect_final_dest)
+    rescue URI::BadURIError
+      anchor = redirect_final_dest
+    end
+  end
+
+  # List of potential path extensions
+  potential_extensions = [
+    # change /path/ to path.html
+    anchor.path.sub(%r{/$}, '.html'),
+    # change /path to /path.html
+    "#{anchor.path}.html",
+    # /path/index.html
+    "#{anchor.path}/index.html"
+  ]
+
+  potential_prefixes = [
+    # relative
+    '',
+    # absolute
+    '/'
+  ]
+
+  potential_prefixes.each do |prefix|
+    potential_extensions.each do |suffix|
+      test_path = "#{prefix}#{suffix}"
+      if File.exist?("out#{test_path}") && File.file?("out#{test_path}")
+        anchor.path = test_path
+        return anchor
+      end
+    end
+  end
+
+  # Return the original path we were passed in.
+  # Its possible this is a redirect which will be resolved later.
+  anchor
+end
 
 # Handles creation and insertion of data into the docset's index
 class Index
@@ -99,6 +167,14 @@ task :setup do
 end
 
 task :copy do
+  # Read redirects file
+  if File.exist?('redirects.json')
+    redirect_file = File.read('redirects.json')
+    REDIRECTS = JSON.parse(redirect_file)
+  else
+    REDIRECTS = {}
+  end
+
   file_list = []
   Dir.chdir('out') { file_list = Dir.glob('**/*').sort }
 
@@ -107,7 +183,12 @@ task :copy do
     target = "Nomad.docset/Contents/Resources/Documents/#{path}"
 
     # Determine relative path of current file
-    source_path = URI.parse(BASE_URL + source.delete_prefix('out'))
+    begin
+      source_path = URI.parse(BASE_URL + source.delete_prefix('out'))
+    rescue URI::InvalidURIError
+      # Skip if unable to parse URL
+      next
+    end
 
     if File.stat(source).directory?
       mkdir_p target
@@ -205,20 +286,48 @@ task :copy do
         next unless e.attributes.key?('href')
 
         anchor = e.attributes['href']
+        begin
+          parsed_uri = URI.parse(anchor.value)
+        rescue URI::InvalidURIError
+          # Skip if unable to parse URL
+          next
+        end
 
-        # If the href is relative
-        next unless anchor.value =~ %r{^/\w+}
+        # Skip unknown URIs
+        next unless [URI::Generic, URI::HTTP, URI::HTTPS].member? parsed_uri.class
 
-        parsed_uri = URI.parse(BASE_URL + anchor.value)
+        # Skip bookmark links
+        next if parsed_uri.is_a?(URI::Generic) && parsed_uri.path.empty? && parsed_uri.fragment
 
-        # Modify URI paths which references directories to point to the
-        # actual index.html file
-        next if parsed_uri.path.end_with?('index.html')
+        # Determine relative path of relative URI
+        parsed_uri = resolve_file_path(parsed_uri)
 
-        parsed_uri.path = "#{parsed_uri.path}/index.html"
+        # Skip processing if URL ultimately redirected to an external site
+        next if [URI::HTTP, URI::HTTPS].member?(parsed_uri.class) && !parsed_uri.host.include?('nomadproject.io')
 
-        # Convert nomadproject.io URLs to relative URLs
-        anchor.value = source_path.route_to(parsed_uri).to_s if parsed_uri.host == 'nomadproject.io'
+        # Ensure that file exists
+        exempt_urls = [
+          '/docs/autoscaling/interals/checks',
+          '/docs/job-specification/hcl2/functions/datetime/timestamp',
+          '/docs/commands/license/put',
+          '/docs/who-uses/noamd'
+        ]
+        unless File.exist?("out#{parsed_uri.path}")
+          # Special case /api/ to rewrite to /api-docs/
+          if parsed_uri.path.start_with?('/api/')
+            parsed_uri.path.sub!(%r{/api/}, '/api-docs/')
+          elsif exempt_urls.include?(parsed_uri.path)
+            next
+          end
+        end
+
+        # Convert relative URLs to absolute URLs
+        if parsed_uri.is_a? URI::Generic
+          relative_value = parsed_uri.path
+          parsed_uri = URI.parse("#{BASE_URL}#{relative_value}")
+        end
+
+        anchor.value = source_path.route_to(parsed_uri).to_s
       end
 
       # Set width of documentation content to 100%
