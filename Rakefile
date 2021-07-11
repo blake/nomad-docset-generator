@@ -120,7 +120,6 @@ end
 task default: %i[clean setup copy create_index package]
 
 task :clean do
-  rm_rf 'build'
   rm_rf 'Nomad.docset'
 end
 

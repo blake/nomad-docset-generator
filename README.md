@@ -46,10 +46,10 @@ To build the docset, use the `build.sh` command. The syntax is as follows:
 ./build.sh <version>
 ```
 
-To build a docset for Nomad version 0.11.0, execute:
+To build a docset for Nomad version 1.1.2, execute:
 
 ```shell
-./build.sh 0.11.0
+./build.sh v1.1.2
 ```
 
 The resultant file will be stored in `./build/<version>/Nomad.tgz`.
@@ -59,7 +59,7 @@ The resultant file will be stored in `./build/<version>/Nomad.tgz`.
 To install the docset, first un-archive the file into the current directory.
 
 ```shell
-tar --extract --gunzip --file ./build/0.11.0/Nomad.tgz
+tar --extract --gunzip --file ./build/v1.1.2/Nomad.tgz
 ```
 
 Install the docset by into [Dash](https://kapeli.com/dash) by either double-clicking
